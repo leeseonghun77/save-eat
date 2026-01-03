@@ -1,4 +1,5 @@
 from flask_sqlalchemy import SQLAlchemy
+from flask_login import UserMixin
 from datetime import datetime
 
 db = SQLAlchemy()
@@ -7,6 +8,9 @@ class Ingredient(db.Model):
     __tablename__ = 'ingredients'
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)
+    # Link to User (Multi-tenancy) - nullable for now for migration, but ideally required
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id')) 
+
     category = db.Column(db.String(50))  # Meat, Vegetable, etc.
     mode = db.Column(db.String(20), default='precision')  # precision(정밀), simple(약식)
     standard_unit = db.Column(db.String(20), default='g') # g, ml, count
@@ -16,6 +20,17 @@ class Ingredient(db.Model):
     
     purchases = db.relationship('Purchase', backref='ingredient', lazy=True)
     usages = db.relationship('Usage', backref='ingredient', lazy=True)
+
+class User(UserMixin, db.Model):
+    __tablename__ = 'users'
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(150), unique=True, nullable=False)
+    email = db.Column(db.String(150), unique=True, nullable=False)
+    password_hash = db.Column(db.String(200), nullable=False)
+
+    # Relationships for Multi-tenancy (Optional for now, but good practice)
+    # ingredients = db.relationship('Ingredient', backref='owner', lazy=True)
+
 
 class ShoppingEvent(db.Model):
     __tablename__ = 'shopping_events'

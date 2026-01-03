@@ -1,5 +1,7 @@
-from flask import Flask, render_template, request, redirect, url_for, jsonify
-from models import db, Ingredient, Purchase, Usage, UnitMatrix, ShoppingEvent
+from flask import Flask, render_template, request, redirect, url_for, jsonify, flash
+from flask_login import LoginManager, login_user, logout_user, login_required, current_user
+from werkzeug.security import generate_password_hash, check_password_hash
+from models import db, Ingredient, Purchase, Usage, UnitMatrix, ShoppingEvent, User
 from datetime import datetime, date
 import os
 
@@ -18,6 +20,61 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.secret_key = 'antigravity_secret'
 
 db.init_app(app)
+login_manager = LoginManager()
+login_manager.init_app(app)
+login_manager.login_view = 'login'
+
+@login_manager.user_loader
+def load_user(user_id):
+    return User.query.get(int(user_id))
+
+# --- Auth Routes ---
+@app.route('/signup', methods=['GET', 'POST'])
+def signup():
+    if request.method == 'POST':
+        username = request.form.get('username')
+        email = request.form.get('email')
+        password = request.form.get('password')
+        
+        user = User.query.filter_by(email=email).first()
+        if user:
+            flash('Email already exists')
+            return redirect(url_for('signup'))
+            
+        new_user = User(
+            username=username,
+            email=email,
+            password_hash=generate_password_hash(password)
+        )
+        db.session.add(new_user)
+        db.session.commit()
+        
+        login_user(new_user)
+        return redirect(url_for('dashboard'))
+        
+    return render_template('signup.html')
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        email = request.form.get('email')
+        password = request.form.get('password')
+        
+        user = User.query.filter_by(email=email).first()
+        if not user or not check_password_hash(user.password_hash, password):
+            flash('Please check your login details and try again.')
+            return redirect(url_for('login'))
+            
+        login_user(user)
+        return redirect(url_for('dashboard'))
+        
+    return render_template('login.html')
+
+@app.route('/logout')
+@login_required
+def logout():
+    logout_user()
+    return redirect(url_for('login'))
 
 # --- Business Logic Helpers ---
 
@@ -90,6 +147,7 @@ def links():
     return render_template('links.html')
 
 @app.route('/')
+@login_required
 def dashboard():
     total_asset = get_total_asset_value()
     expiring_list = get_expiring_items()
@@ -139,6 +197,7 @@ def dashboard():
                            expiring=expiring_list)
 
 @app.route('/inventory')
+@login_required
 def inventory():
     # Show detailed active purchases (Inventory Batches)
     purchases = Purchase.query.filter(Purchase.remaining_quantity > 0).order_by(Purchase.expiry_date.asc()).all()
@@ -151,6 +210,7 @@ def add_ingredient():
     pass 
 
 @app.route('/purchase', methods=['GET', 'POST'])
+@login_required
 def purchase():
     if request.method == 'POST':
         # Batch Purchase Logic
@@ -189,9 +249,9 @@ def purchase():
                 expiry_str = item.get('expiry')
                 
                 # Find/Create Ingredient
-                ing = Ingredient.query.filter_by(name=name).first()
+                ing = Ingredient.query.filter_by(name=name, user_id=current_user.id).first()
                 if not ing:
-                    ing = Ingredient(name=name, category='일반', mode='precision', standard_unit=unit)
+                    ing = Ingredient(name=name, category='일반', mode='precision', standard_unit=unit, user_id=current_user.id)
                     db.session.add(ing)
                     db.session.commit()
                 
@@ -316,6 +376,7 @@ def delete_usage(usage_id):
     return jsonify({'success': False}), 400
 
 @app.route('/cook', methods=['GET', 'POST'])
+@login_required
 def cook():
     if request.method == 'POST':
         # Batch Usage Logic
