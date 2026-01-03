@@ -1,0 +1,54 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="card">
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+        <h2>현재 보유 재고</h2>
+        <a href="{{ url_for('purchase') }}" class="btn btn-primary"><i class="fas fa-plus"></i> 구매(입고) 기록</a>
+    </div>
+
+    <div class="table-container">
+        <table>
+            <thead>
+                <tr>
+                    <th>품목명</th>
+                    <th>잔여 수량</th>
+                    <th>단위</th>
+                    <th>취득 단가</th>
+                    <th>유통기한</th>
+                    <th>조치</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for p in purchases %}
+                <tr>
+                    <td>{{ p.ingredient.name }}</td>
+                    <td style="color:var(--primary-color); font-weight:bold;">{{ "{:,.1f}".format(p.remaining_quantity)
+                        }}</td>
+                    <td>{{ p.ingredient.standard_unit }}</td>
+                    <td>₩{{ "{:,.0f}".format(p.cost_per_unit) }}</td>
+                    <td>
+                        {{ p.expiry_date.strftime('%Y-%m-%d') if p.expiry_date else '-' }}
+                        {% if p.expiry_date %}
+                        {% set days = (p.expiry_date - date_now(True)).days %}
+                        {% if days < 0 %} <span class="text-danger">(만료)</span>
+                            {% elif days <= 3 %} <span class="text-danger">(D-{{ days }})</span>
+                                {% endif %}
+                                {% endif %}
+                    </td>
+                    <td>
+                        <button class="btn btn-secondary" onclick="quickDiscard({{ p.id }})"
+                            style="padding: 4px 8px; font-size: 0.8em;">폐기</button>
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="6" style="text-align:center; padding: 20px;">보유 중인 재고가 없습니다. 장보기를 통해 입고해주세요.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{% endblock %}

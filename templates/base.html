@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>세이브 잇 (Save Eat)</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    {% block head %}{% endblock %}
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <div class="brand-container">
+                <div class="logo">
+                    <!-- Fridge Icon -->
+                    <i class="fas fa-refrigerator"></i> 세이브 잇 <span
+                        style="font-size: 0.6em; font-weight: normal; color: var(--text-muted); margin-left:10px;">(Save
+                        Eat)</span>
+                </div>
+                <div class="slogan">
+                    결제한 날이 아니라 요리한 날, 당신의 식비가 비로소 완성됩니다.
+                </div>
+            </div>
+            <nav>
+                <ul>
+                    <li><a href="{{ url_for('dashboard') }}"
+                            class="{{ 'active' if request.endpoint == 'dashboard' else '' }}"><i
+                                class="fas fa-chart-pie"></i> 리포트</a></li>
+                    <li><a href="{{ url_for('inventory') }}"
+                            class="{{ 'active' if request.endpoint == 'inventory' else '' }}"><i
+                                class="fas fa-boxes"></i> 자산(냉장고)</a></li>
+                    <li><a href="{{ url_for('purchase') }}"
+                            class="{{ 'active' if request.endpoint == 'purchase' else '' }}"><i
+                                class="fas fa-shopping-cart"></i> 입고(장보기)</a></li>
+                    <li><a href="{{ url_for('cook') }}" class="{{ 'active' if request.endpoint == 'cook' else '' }}"><i
+                                class="fas fa-utensils"></i> 소비(요리)</a></li>
+                </ul>
+            </nav>
+        </header>
+
+        <main>
+            {% block content %}{% endblock %}
+        </main>
+    </div>
+</body>
+
+</html>

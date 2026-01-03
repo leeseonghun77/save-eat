@@ -1,0 +1,495 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="dashboard-grid">
+    <!-- Asset Summary -->
+    <div class="card">
+        <h3><i class="fas fa-wallet"></i> 현재 냉장고 자산</h3>
+        <div class="stat-value">₩{{ "{:,.0f}".format(total_asset) }}</div>
+        <p class="stat-label">보유 식재료 원가 총합</p>
+    </div>
+
+    <!-- Monthly Consumption & Waste -->
+    <div class="card">
+        <h3 id="usageWasteTitle"><i class="fas fa-chart-pie"></i> {{ current_month_str }} 소비 및 폐기</h3>
+        <div style="display: flex; justify-content: space-between; align-items: flex-end;">
+            <div>
+                <div id="usageValue" class="stat-value" style="color: var(--warning); font-size: 1.5rem;">₩{{
+                    "{:,.0f}".format(monthly_usage)
+                    }}</div>
+                <p class="stat-label">소비 (요리)</p>
+            </div>
+            <div style="text-align: right;">
+                <div id="wasteValue" class="stat-value text-danger" style="font-size: 1.5rem;">₩{{
+                    "{:,.0f}".format(monthly_waste) }}
+                </div>
+                <p class="stat-label">폐기 (버림)</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Monthly Shopping -->
+    <div class="card">
+        <h3 id="shoppingTitle"><i class="fas fa-shopping-cart"></i> {{ current_month_str }} 자산 입고(장보기)</h3>
+        <div id="shoppingValue" class="stat-value" style="color:#60a5fa;">₩{{ "{:,.0f}".format(monthly_shopping) }}
+        </div>
+        <p class="stat-label">이번 달 총 입고 금액</p>
+    </div>
+</div>
+
+<div class="card" style="margin-top: 24px;">
+    <h3 class="text-danger"><i class="fas fa-exclamation-triangle"></i> 손실 주의보 (유통기한 임박)</h3>
+    {% if expiring %}
+    <div class="table-container">
+        <table>
+            <thead>
+                <tr>
+                    <th>품목명</th>
+                    <th>남은 수량</th>
+                    <th>남은 기간</th>
+                    <th>예상 손실액</th>
+                    <th>조치</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in expiring %}
+                <tr>
+                    <td>{{ item.name }}</td>
+                    <td>{{ item.qty }} {{ item.unit }}</td>
+                    <td class="text-danger">D-{{ item.days_left }}</td>
+                    <td class="text-danger">₩{{ "{:,.0f}".format(item.potential_loss) }}</td>
+                    <td>
+                        <button class="btn btn-secondary" onclick="quickDiscard({{ item.id }})"
+                            style="padding: 4px 8px; font-size: 0.8em;">폐기</button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p style="color: var(--success); padding: 20px 0;">3일 내 만료되는 식재료가 없습니다. 훌륭합니다!</p>
+    {% endif %}
+</div>
+
+<!-- Calendar Section -->
+<div class="card">
+    <div class="calendar-header">
+        <button class="btn btn-secondary" id="prevMonth"><i class="fas fa-chevron-left"></i></button>
+        <h3 id="currentMonthLabel" style="margin:0;">2024년 1월</h3>
+        <button class="btn btn-secondary" id="nextMonth"><i class="fas fa-chevron-right"></i></button>
+    </div>
+    <div class="calendar-grid" id="calendarGrid">
+        <!-- JS generates this -->
+    </div>
+</div>
+
+<!-- Detail Modal -->
+<div class="modal-overlay" id="detailModal">
+    <div class="modal-content">
+        <span class="modal-close">&times;</span>
+        <h2 id="modalDateTitle" style="margin-bottom: 20px;">날짜 상세</h2>
+        <div id="modalBody">
+            <!-- Details go here -->
+        </div>
+        <div
+            style="margin-top: 20px; border-top: 1px solid var(--border-color); padding-top: 15px; display: flex; gap: 10px;">
+            <a id="addPurchaseBtn" href="#" class="btn btn-secondary" style="flex: 1; text-align:center;">
+                <i class="fas fa-cart-plus"></i> 재고 추가 (장보기)
+            </a>
+            <a id="addMealBtn" href="#" class="btn btn-primary" style="flex: 1; text-align:center;">
+                <i class="fas fa-utensils"></i> 요리 추가 (소비)
+            </a>
+        </div>
+    </div>
+</div>
+
+<script>
+    let currentDate = new Date();
+
+    async function fetchMonthlyStats(year, month) {
+        const res = await fetch(`/api/monthly_stats?year=${year}&month=${month}`);
+        return await res.json();
+    }
+
+    async function renderCalendar() {
+        const year = currentDate.getFullYear();
+        const month = currentDate.getMonth() + 1; // 1-12
+
+        document.getElementById('currentMonthLabel').innerText = `${year}년 ${month}월`;
+
+        const grid = document.getElementById('calendarGrid');
+        grid.innerHTML = '';
+
+        // 1. Headers (Sun ~ Sat)
+        const days = ['일', '월', '화', '수', '목', '금', '토'];
+        days.forEach(d => {
+            const el = document.createElement('div');
+            el.className = 'calendar-day-header';
+            el.innerText = d;
+
+            // Red for Sunday
+            if (d === '일') el.style.color = 'var(--danger)';
+            // Blue for Saturday
+            if (d === '토') el.style.color = '#3b82f6';
+
+            grid.appendChild(el);
+        });
+
+        // 2. Data
+        const stats = await fetchMonthlyStats(year, month); // { "YYYY-MM-DD": cost }
+        // We also need shopping data. Let's fetch all and filter client side for now or optimize later.
+        // Actually fetchMonthlyStats in user code calls /api/monthly_stats which now returns aggregated data!
+        // So 'stats' contains both usage and waste cost.
+
+        // We'll fetch that separately to show icons.
+        const resShop = await fetch(`/api/shopping_events`);
+        const allEvents = await resShop.json();
+        const shoppingData = {};
+
+        // Calculate Totals for this month
+        let totalShopping = 0;
+        let totalUsage = 0;
+        let totalWaste = 0;
+
+        allEvents.forEach(e => {
+            // e.date is YYYY-MM-DD
+            shoppingData[e.date] = true;
+
+            // Filter for current month shopping total
+            const [y, m, d] = e.date.split('-').map(Number);
+            if (y === year && m === month) {
+                totalShopping += e.total_cost;
+            }
+        });
+
+        // Sum Usage & Waste from stats (which is already filtered by month)
+        Object.values(stats).forEach(day => {
+            totalUsage += day.usage;
+            totalWaste += day.waste;
+        });
+
+        try {
+            // Update DOM
+            console.log('Updating stats for month:', month);
+            console.log('Totals -> Shopping:', totalShopping, 'Usage:', totalUsage, 'Waste:', totalWaste);
+
+            const shopTitle = document.getElementById('shoppingTitle');
+            const shopValue = document.getElementById('shoppingValue');
+            const uwTitle = document.getElementById('usageWasteTitle');
+            const uValue = document.getElementById('usageValue');
+            const wValue = document.getElementById('wasteValue');
+
+            if (shopTitle) shopTitle.innerHTML = `<i class="fas fa-shopping-cart"></i> ${month}월 장보기`;
+            if (shopValue) shopValue.innerText = `₩${totalShopping.toLocaleString()}`;
+
+            if (uwTitle) uwTitle.innerHTML = `<i class="fas fa-chart-pie"></i> ${month}월 소비 및 폐기`;
+            if (uValue) uValue.innerText = `₩${totalUsage.toLocaleString()}`;
+            if (wValue) wValue.innerText = `₩${totalWaste.toLocaleString()}`;
+        } catch (err) {
+            console.error('Error updating dashboard stats:', err);
+            alert('통계 업데이트 중 오류: ' + err.message);
+        }
+
+        // 3. Grid Logic
+        const firstDay = new Date(year, month - 1, 1).getDay();
+        const lastDate = new Date(year, month, 0).getDate();
+
+        // Empty slots (Previous Month)
+        for (let i = 0; i < firstDay; i++) {
+            const el = document.createElement('div');
+            el.className = 'calendar-day empty'; // style hook
+            grid.appendChild(el);
+        }
+
+        // Days
+        for (let d = 1; d <= lastDate; d++) {
+            const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+            const cell = document.createElement('div');
+            cell.className = 'calendar-day';
+
+            // Check today
+            const checkDate = new Date();
+            if (year === checkDate.getFullYear() && (month - 1) === checkDate.getMonth() && d === checkDate.getDate()) {
+                cell.classList.add('is-today');
+            }
+
+            // Sunday/Saturday Color
+            const dayOfWeek = new Date(year, month - 1, d).getDay();
+            if (dayOfWeek === 0) cell.classList.add('sunday');
+            if (dayOfWeek === 6) cell.classList.add('saturday');
+
+            // Usage Cost Text (Only Usage, exclude Waste)
+            let costHtml = '<div></div>'; // Placeholder for spacing
+
+            const dayStats = stats[dateStr];
+
+            if (dayStats && dayStats.usage > 0) {
+                costHtml = `<div style="font-size:0.85rem; color: #fbbf24; font-weight:bold;">-${dayStats.usage.toLocaleString()}</div>`;
+            }
+
+            // Icons Container
+            let iconsHtml = '';
+
+            // Meal Icon (If usage exists)
+            if (dayStats && dayStats.usage > 0) {
+                iconsHtml += `<div onclick="openUsageDetail('${dateStr}')" class="calendar-icon meal-icon" title="식사(소비) 상세"><i class="fas fa-utensils"></i></div>`;
+            }
+
+            // Shopping Icon (If shopping exists)
+            if (shoppingData[dateStr]) {
+                iconsHtml += `<div onclick="openShoppingDetail(event, '${dateStr}')" class="calendar-icon shopping-icon" title="장보기 상세"><i class="fas fa-shopping-cart"></i></div>`;
+            }
+
+            // Flex container for bottom row
+            cell.innerHTML = `
+                <div class="day-number">${d}</div>
+                <div style="margin-top:auto; display:flex; justify-content:space-between; align-items:flex-end; width:100%;">
+                    ${costHtml}
+                    <div style="display:flex; gap:5px;">${iconsHtml}</div>
+                </div>
+            `;
+
+            // Main Cell Click -> Default to Usage (or maybe do nothing if icons cover it?)
+            // If we want the cell to open usage by default:
+            cell.onclick = (e) => {
+                // If clicked purely on cell background, maybe open usage?
+                // But icons have stopPropagation ideally.
+                // Let's keep it simple. If valid date, default to usage.
+                if (!e.target.closest('.calendar-icon')) {
+                    openUsageDetail(dateStr);
+                }
+            };
+            grid.appendChild(cell);
+        }
+    }
+
+    async function openShoppingDetail(e, dateStr) {
+        if (e) e.stopPropagation(); // Prevent bubbling to cell click
+
+        document.getElementById('detailModal').classList.add('open');
+        document.getElementById('modalDateTitle').innerText = `${dateStr} 장보기 상세`;
+        const body = document.getElementById('modalBody');
+        body.innerHTML = '로딩중...';
+
+        const resShop = await fetch(`/api/shopping_events`);
+        const allEvents = await resShop.json();
+        const dayEvents = allEvents.filter(e => e.date === dateStr);
+
+        if (dayEvents.length === 0) {
+            body.innerHTML = '<p>장보기 기록이 없습니다.</p>';
+            return;
+        }
+
+        let html = '';
+        for (let evt of dayEvents) {
+            const dRes = await fetch(`/api/shopping_event_detail/${evt.id}`);
+            const detail = await dRes.json();
+
+            html += `
+                <div class="card" style="margin-bottom:10px; border:1px solid var(--border-color);">
+                    <div style="display:flex; justify-content:space-between; margin-bottom:10px;">
+                        <span><i class="fas fa-store"></i> ${evt.place || "마트"}</span>
+                        <span style="font-weight:bold;">총 ₩${detail.total_cost.toLocaleString()}</span>
+                    </div>
+                    <div style="font-size:0.9em;">
+            `;
+
+            detail.items.forEach(item => {
+                let statusHtml = '';
+                if (item.status === 'discarded') statusHtml = '<span class="text-danger">폐기됨</span>';
+                else statusHtml = '<span class="text-success">보관중</span>';
+
+                // Toggle Button (Simple Waste)
+                let actionBtn = '';
+                if (item.status !== 'discarded') {
+                    actionBtn = `<button onclick="setDiscarded(${item.id})" style="font-size:0.8em; padding:2px 5px; margin-left:5px;" class="btn btn-secondary">폐기처리</button>`;
+                }
+
+                html += `
+                    <div style="display:flex; justify-content:space-between; align-items:center; padding:5px 0; border-bottom:1px dashed #333;">
+                        <div style="flex:1;">
+                            <div>${item.name}</div>
+                            <div style="font-size:0.8em; color:#aaa;">${item.qty}개 | ₩${item.price.toLocaleString()}</div>
+                        </div>
+                        <div style="text-align:right;">
+                            ${statusHtml} <br>
+                            ${actionBtn}
+                        </div>
+                    </div>
+                `;
+            });
+            html += '</div></div>';
+        }
+
+        body.innerHTML = html;
+        document.getElementById('addPurchaseBtn').href = `/purchase?date=${dateStr}`;
+        document.getElementById('addMealBtn').style.display = 'none'; // Hide meal add in shopping view
+        document.getElementById('addPurchaseBtn').style.display = 'block';
+    }
+
+    async function openUsageDetail(dateStr) {
+        document.getElementById('detailModal').classList.add('open');
+        document.getElementById('modalDateTitle').innerText = `${dateStr} 소비(요리) 상세`;
+        const body = document.getElementById('modalBody');
+        body.innerHTML = '로딩중...';
+
+        const res = await fetch(`/api/daily_detail/${dateStr}`);
+        const grouped = await res.json();
+
+        if (Object.keys(grouped).length === 0) {
+            body.innerHTML = '<p style="text-align:center;">요리 기록이 없습니다.</p>';
+        } else {
+            let html = '<div class="accordion">';
+            let totalDaily = 0;
+
+            for (const [type, info] of Object.entries(grouped)) {
+                totalDaily += info.total;
+                // Expandable Header
+                html += `
+                    <div style="background:rgba(0,0,0,0.03); padding:10px; margin-bottom:5px; border-radius:8px; cursor:pointer;" onclick="this.nextElementSibling.classList.toggle('hidden')">
+                        <div style="display:flex; justify-content:space-between; font-weight:bold;">
+                            <span>${type}</span>
+                            <span>₩${info.total.toLocaleString()}</span>
+                        </div>
+                    </div>
+                    <div class="hidden" style="padding:10px; background:rgba(0,0,0,0.02); margin-bottom:10px;">
+                 `;
+
+                info.items.forEach(item => {
+                    html += `
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; padding: 8px; background: rgba(0,0,0,0.01); border-radius: 6px;">
+                            <div style="display:flex; align-items:center;">
+                                <span style="font-weight:500;">${item.name}</span>
+                                <span style="font-size:0.8em; background:rgba(0,0,0,0.05); padding:2px 6px; border-radius:4px; margin-left:8px; color:var(--text-muted);">${item.amount}</span>
+                            </div>
+                            <div style="display:flex; align-items:center; gap:10px;">
+                                <span style="font-weight:bold; color:#fbbf24;">₩${item.cost.toLocaleString()}</span>
+                                <button onclick="deleteUsage(${item.id}, '${dateStr}')" class="btn btn-sm btn-secondary" style="padding:2px 6px; font-size:0.7em;" title="삭제"><i class="fas fa-trash"></i></button>
+                            </div>
+                        </div>
+                     `;
+                });
+
+                html += '</div>';
+            }
+            html += '</div>';
+
+            html += `<div style="text-align:right; font-size:1.2em; font-weight:bold; margin-top:15px; color:var(--warning);">총 합계: ₩${totalDaily.toLocaleString()}</div>`;
+            body.innerHTML = html;
+        }
+
+        document.getElementById('addMealBtn').href = `/cook?date=${dateStr}`;
+        document.getElementById('addMealBtn').style.display = 'block';
+        document.getElementById('addPurchaseBtn').style.display = 'none'; // Hide purchase add in meal view
+    }
+
+    async function deleteUsage(usageId, dateStr) {
+        if (!confirm('정말 이 소비 내역을 삭제하시겠습니까?\n(재고는 사용 전으로 복구됩니다)')) return;
+
+        try {
+            const res = await fetch(`/api/delete_usage/${usageId}`, { method: 'POST' });
+            if (res.ok) {
+                // Reload modal and calendar
+                await openUsageDetail(dateStr);
+                await renderCalendar();
+            } else {
+                alert('삭제 실패: 서버 오류');
+            }
+        } catch (e) {
+            console.error(e);
+            alert('삭제 중 오류 발생');
+        }
+    }
+
+
+    async function setDiscarded(id) {
+        if (!confirm('전량 폐기 처리하시겠습니까?')) return;
+        const res = await fetch(`/api/update_purchase_status/${id}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: 'discarded' })
+        });
+        const dateStr = document.getElementById('modalDateTitle').innerText.split(' ')[0];
+        if (await res.json()) {
+            openShoppingDetail(null, dateStr); // Reload
+            renderCalendar(); // Update stats
+        }
+    }
+
+    async function quickDiscard(id) {
+        if (!confirm('해당 항목을 폐기 처리하시겠습니까?')) return;
+
+        const res = await fetch(`/api/update_purchase_status/${id}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: 'discarded' })
+        });
+
+        const json = await res.json();
+        if (json.success) {
+            window.location.reload();
+        } else {
+            alert('처리 중 오류가 발생했습니다.');
+        }
+    }
+
+    async function discardItem(purchaseId, maxQty) {
+        const amt = prompt(`폐기할 수량을 입력하세요. (최대 ${maxQty})`, maxQty);
+        if (!amt) return;
+        const val = parseFloat(amt);
+        if (isNaN(val) || val <= 0 || val > maxQty) {
+            alert('유효하지 않은 수량입니다.');
+            return;
+        }
+
+        const res = await fetch(`/api/discard/${purchaseId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ amount: val })
+        });
+        const json = await res.json();
+
+        if (json.success) {
+            const dateStr = document.getElementById('modalDateTitle').innerText.split(' ')[0];
+            openDetail(dateStr); // Reload
+        } else {
+            alert('처리 실패: ' + json.error);
+        }
+    }
+
+    async function deleteUsage(id) {
+        if (!confirm('정말 삭제하시겠습니까? (재고가 복구됩니다)')) return;
+
+        const res = await fetch(`/delete_usage/${id}`, { method: 'POST' });
+        const json = await res.json();
+
+        if (json.success) {
+            alert('삭제되었습니다.');
+            // Reload modal and calendar
+            renderCalendar();
+            const dateStr = document.getElementById('modalDateTitle').innerText.split(' ')[0];
+            openDetail(dateStr);
+        } else {
+            alert('삭제 실패');
+        }
+    }
+
+    // Interactions
+    document.querySelector('.modal-close').onclick = () => {
+        document.getElementById('detailModal').classList.remove('open');
+    };
+
+    document.getElementById('prevMonth').onclick = () => {
+        currentDate.setMonth(currentDate.getMonth() - 1);
+        renderCalendar();
+    };
+    document.getElementById('nextMonth').onclick = () => {
+        currentDate.setMonth(currentDate.getMonth() + 1);
+        renderCalendar();
+    };
+
+    // Init
+    renderCalendar();
+</script>
+{% endblock %}
